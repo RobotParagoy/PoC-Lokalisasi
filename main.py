@@ -29,6 +29,8 @@ CAMERA_INDEX = 1          # USB camera index (try 1 if 0 doesn't work)
 FRAME_W      = 1280
 FRAME_H      = 720
 TARGET_FPS   = 60         # request 60fps from camera
+BRIGHTNESS   = 120        # camera brightness (0–255, driver-dependent)
+CONTRAST     = 1.3        # contrast multiplier applied in software
 
 # Set to a video path to test with a video file (e.g. "field.mp4")
 # Set to None to use the live camera
@@ -187,8 +189,14 @@ def log_positions(detections, H, timestamp_ms=None):
 # MAIN LOOP
 # ─────────────────────────────────────────────
 
+def apply_contrast(frame, contrast):
+    """Scale pixel values around mid-grey by the given multiplier."""
+    return cv2.convertScaleAbs(frame, alpha=contrast, beta=0)
+
+
 def process_frame(frame, detector, H, dt):
     """Detect tags, update homography, return (vis, H, detections)."""
+    frame = apply_contrast(frame, CONTRAST)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detections = detector.detect(gray)
 
@@ -255,6 +263,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
     cap.set(cv2.CAP_PROP_FPS,          TARGET_FPS)
+    cap.set(cv2.CAP_PROP_BRIGHTNESS,   BRIGHTNESS)
 
     prev_time    = time.time()
     last_log_t   = prev_time
