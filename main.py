@@ -25,14 +25,14 @@ import time
 # CONFIGURATION  — edit these to match your setup
 # ─────────────────────────────────────────────
 
-CAMERA_INDEX = 0          # USB camera index (try 1 if 0 doesn't work)
+CAMERA_INDEX = 1          # USB camera index (try 1 if 0 doesn't work)
 FRAME_W      = 1280
 FRAME_H      = 720
 TARGET_FPS   = 60         # request 60fps from camera
 
 # Set to a video path to test with a video file (e.g. "field.mp4")
 # Set to None to use the live camera
-TEST_VIDEO   = "field.mp4"
+TEST_VIDEO   = None
 
 TAG_FAMILY   = "tag36h11" # most robust family — use this for all your tags
 
