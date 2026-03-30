@@ -41,6 +41,12 @@ TARGET_FPS   = 60         # request fps (USB cam only; RTSP uses source fps)
 BRIGHTNESS   = 120        # camera brightness (USB cam only)
 CONTRAST     = 1.3        # contrast multiplier applied in software
 
+# ── Display settings ──────────────────────────────────────────────────────────
+# The display window is resized to these dimensions so even a 4K RTSP stream
+# fits comfortably on screen.  Detection still runs on the full-res frame.
+DISPLAY_W    = 960
+DISPLAY_H    = 540
+
 # ── RTSP-specific options ─────────────────────────────────────────────────────
 RTSP_RECONNECT_DELAY = 3  # seconds to wait before reconnecting on drop
 RTSP_TRANSPORT       = "tcp"  # "tcp" is more reliable than default "udp"
@@ -271,7 +277,10 @@ def main():
                 log_positions(detections, H, timestamp_ms=pos_ms)
                 last_log_ms = pos_ms
 
-            cv2.imshow("Robot Tracker — Video", vis)
+            display = cv2.resize(vis, (DISPLAY_W, DISPLAY_H))
+            cv2.namedWindow("Robot Tracker — Video", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Robot Tracker — Video", DISPLAY_W, DISPLAY_H)
+            cv2.imshow("Robot Tracker — Video", display)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
@@ -342,9 +351,14 @@ def main():
             last_log_t = now
 
         fps = 1.0 / dt if dt > 0 else 0
-        cv2.putText(vis, f"{fps:.0f} fps", (FRAME_W - 75, 25),
+
+        # Resize for display — keeps the window manageable for high-res streams
+        display = cv2.resize(vis, (DISPLAY_W, DISPLAY_H))
+        cv2.putText(display, f"{fps:.0f} fps", (DISPLAY_W - 80, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-        cv2.imshow(source_label, vis)
+        cv2.namedWindow(source_label, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(source_label, DISPLAY_W, DISPLAY_H)
+        cv2.imshow(source_label, display)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
