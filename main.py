@@ -25,16 +25,25 @@ import time
 # CONFIGURATION  — edit these to match your setup
 # ─────────────────────────────────────────────
 
-CAMERA_INDEX = 1          # USB camera index (try 1 if 0 doesn't work)
+# ── Source mode ────────────────────────────────────────────────────────────────
+# Priority: RTSP_URL  →  TEST_VIDEO  →  CAMERA_INDEX
+#   • Set RTSP_URL to an RTSP address to stream from an IP camera / NVR.
+#   • Set TEST_VIDEO to a file path to replay a recorded video.
+#   • Otherwise the USB camera at CAMERA_INDEX is used.
+RTSP_URL     = "rtsp://admin:password@192.168.1.100:554/stream1"  # ← edit this
+TEST_VIDEO   = None       # e.g. "field.mp4"
+CAMERA_INDEX = 1          # USB camera fallback
+
+# ── Camera / stream settings ──────────────────────────────────────────────────
 FRAME_W      = 1280
 FRAME_H      = 720
-TARGET_FPS   = 60         # request 60fps from camera
-BRIGHTNESS   = 120        # camera brightness (0–255, driver-dependent)
+TARGET_FPS   = 60         # request fps (USB cam only; RTSP uses source fps)
+BRIGHTNESS   = 120        # camera brightness (USB cam only)
 CONTRAST     = 1.3        # contrast multiplier applied in software
 
-# Set to a video path to test with a video file (e.g. "field.mp4")
-# Set to None to use the live camera
-TEST_VIDEO   = None
+# ── RTSP-specific options ─────────────────────────────────────────────────────
+RTSP_RECONNECT_DELAY = 3  # seconds to wait before reconnecting on drop
+RTSP_TRANSPORT       = "tcp"  # "tcp" is more reliable than default "udp"
 
 TAG_FAMILY   = "tag36h11" # most robust family — use this for all your tags
 
@@ -212,6 +221,18 @@ def process_frame(frame, detector, H, dt):
     return vis, H, detections
 
 
+def open_rtsp(url):
+    """Open an RTSP stream with TCP transport for reliability."""
+    cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    if RTSP_TRANSPORT == "tcp":
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # minimise latency
+        # Force TCP — avoids UDP packet-loss artefacts
+        import os
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    return cap
+
+
 def main():
     detector = Detector(
         families=TAG_FAMILY,
@@ -225,7 +246,7 @@ def main():
     H = None
 
     # ── Video file mode ──
-    if TEST_VIDEO is not None:
+    if TEST_VIDEO is not None and RTSP_URL is None:
         cap = cv2.VideoCapture(TEST_VIDEO)
         if not cap.isOpened():
             print(f"Error: could not open video '{TEST_VIDEO}'")
@@ -234,14 +255,14 @@ def main():
         fps_video = cap.get(cv2.CAP_PROP_FPS) or 30
         print(f"Playing: {TEST_VIDEO}  ({fps_video:.0f} fps)  —  press 'q' to quit")
 
-        last_log_ms   = -9999   # tracks when we last printed the table
-        LOG_INTERVAL  = 500     # ms between console refreshes
+        last_log_ms   = -9999
+        LOG_INTERVAL  = 500
         detections    = []
 
         while True:
             ret, frame = cap.read()
             if not ret:
-                break   # end of video
+                break
 
             pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
             vis, H, detections = process_frame(frame, detector, H, dt=1/fps_video)
@@ -258,25 +279,58 @@ def main():
         cv2.destroyAllWindows()
         return
 
-    # ── Live camera mode ──
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
-    cap.set(cv2.CAP_PROP_FPS,          TARGET_FPS)
-    cap.set(cv2.CAP_PROP_BRIGHTNESS,   BRIGHTNESS)
+    # ── RTSP stream mode (real-time IP camera) ──
+    if RTSP_URL is not None:
+        print(f"Connecting to RTSP stream: {RTSP_URL}")
+        cap = open_rtsp(RTSP_URL)
+        if not cap.isOpened():
+            print("Error: could not open RTSP stream.")
+            return
+        source_label = "Robot Tracker — RTSP"
+        print(f"RTSP stream opened — press 'q' to quit, 'r' to reset homography.")
+    else:
+        # ── USB camera fallback ──
+        cap = cv2.VideoCapture(CAMERA_INDEX)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
+        cap.set(cv2.CAP_PROP_FPS,          TARGET_FPS)
+        cap.set(cv2.CAP_PROP_BRIGHTNESS,   BRIGHTNESS)
+        source_label = "Robot Tracker"
+        print("Starting USB camera — press 'q' to quit, 'r' to reset homography.")
 
     prev_time    = time.time()
     last_log_t   = prev_time
-    LOG_INTERVAL = 0.5          # seconds between console refreshes
+    LOG_INTERVAL = 0.5
     detections   = []
-    print("Starting — point camera at field.  Press 'q' to quit.")
+    consecutive_failures = 0
 
     while True:
         ret, frame = cap.read()
-        if not ret:
-            print("Camera read failed.")
-            break
 
+        # ── Handle frame-read failures (RTSP auto-reconnect) ──
+        if not ret:
+            consecutive_failures += 1
+            if RTSP_URL is not None and consecutive_failures < 10:
+                # Tolerate transient drops
+                time.sleep(0.05)
+                continue
+
+            if RTSP_URL is not None:
+                print(f"\n⚠  RTSP stream lost — reconnecting in {RTSP_RECONNECT_DELAY}s …")
+                cap.release()
+                time.sleep(RTSP_RECONNECT_DELAY)
+                cap = open_rtsp(RTSP_URL)
+                consecutive_failures = 0
+                if not cap.isOpened():
+                    print("Reconnect failed. Retrying …")
+                else:
+                    print("Reconnected.")
+                continue
+            else:
+                print("Camera read failed.")
+                break
+
+        consecutive_failures = 0
         now = time.time()
         dt  = now - prev_time
         prev_time = now
@@ -290,10 +344,14 @@ def main():
         fps = 1.0 / dt if dt > 0 else 0
         cv2.putText(vis, f"{fps:.0f} fps", (FRAME_W - 75, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-        cv2.imshow("Robot Tracker", vis)
+        cv2.imshow(source_label, vis)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
             break
+        elif key == ord('r'):
+            H = None
+            print("Homography reset.")
 
     cap.release()
     cv2.destroyAllWindows()
