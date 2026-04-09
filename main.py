@@ -33,6 +33,7 @@ FRAME_H      = 720
 TARGET_FPS   = 1
 BRIGHTNESS   = 120
 CONTRAST     = 1.3
+PROCESS_FPS  = 4          # max frames/sec the main loop will process (saves CPU)
 
 # ── Display settings ──────────────────────────────────────────────────────────
 DISPLAY_W    = 960
@@ -318,15 +319,21 @@ class ThreadedVideoCapture:
     Continuously grab frames from a VideoCapture in a background thread,
     keeping only the **latest** frame.  This prevents the RTSP internal
     buffer from filling up and causing a multi-second delay.
+
+    Uses a threading.Event so the main loop can *sleep* until a fresh
+    frame arrives instead of busy-polling.
     """
 
     def __init__(self, cap):
-        self._cap   = cap
-        self._lock  = threading.Lock()
-        self._frame = None
-        self._ret   = False
-        self._running = True
-        self._thread  = threading.Thread(target=self._reader, daemon=True)
+        self._cap       = cap
+        self._lock      = threading.Lock()
+        self._frame     = None
+        self._ret       = False
+        self._seq       = 0          # incremented on every new grab
+        self._consumed  = 0          # last seq the caller has seen
+        self._new_frame = threading.Event()
+        self._running   = True
+        self._thread    = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
 
     # ── background loop: drain the capture buffer ──────────────────────────
@@ -336,15 +343,32 @@ class ThreadedVideoCapture:
             with self._lock:
                 self._ret   = ret
                 self._frame = frame
-            if not ret:
-                # avoid busy-spinning when the stream is down
-                time.sleep(0.01)
+                self._seq  += 1
+            if ret:
+                self._new_frame.set()       # wake up the main loop
+            else:
+                time.sleep(0.01)            # stream down — don't busy-spin
 
-    # ── public API (matches cv2.VideoCapture) ─────────────────────────────
+    # ── public API ─────────────────────────────────────────────────────────
     def read(self):
         """Return the most recent frame (never blocks on decode)."""
         with self._lock:
+            self._consumed = self._seq
             return self._ret, self._frame
+
+    def has_new_frame(self):
+        """True if the reader grabbed a frame we haven't consumed yet."""
+        with self._lock:
+            return self._seq > self._consumed
+
+    def wait_for_frame(self, timeout=None):
+        """
+        Block efficiently until a new frame is available (or timeout).
+        Returns True if a frame is ready, False on timeout.
+        """
+        ready = self._new_frame.wait(timeout=timeout)
+        self._new_frame.clear()
+        return ready
 
     def isOpened(self):
         return self._cap.isOpened()
@@ -536,38 +560,74 @@ def main():
     fisheye_bal      = FISHEYE_BALANCE
     undistort_maps   = None
     maps_built       = False      # build maps lazily after first frame arrives
-    prev_frame_id    = None       # used to skip duplicate frames from the reader
+
+    # FPS throttle: how long the main loop should wait between frames
+    frame_interval   = 1.0 / PROCESS_FPS
+    next_process_at  = 0.0        # process immediately on first frame
 
     while True:
-        ret, frame = cap.read()
-
-        # Skip if the threaded reader returned the exact same object (no new frame yet)
-        if ret and frame is not None and frame is prev_frame_id:
-            time.sleep(0.005)   # yield CPU briefly
-            # still process key events so UI stays responsive
+        # ── Wait efficiently for the next frame (or timeout for UI events) ──
+        wait_budget = max(0.0, next_process_at - time.time())
+        if wait_budget > 0:
+            # Sleep until it's time to process, but wake if a fresh frame arrives
+            cap.wait_for_frame(timeout=wait_budget)
+            # Handle key events during the wait so UI stays responsive
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            continue
-        if ret and frame is not None:
-            prev_frame_id = frame
+            if key in (ord('1'), ord('2'), ord('3'), ord('4')):
+                selected = key - ord('1')
+            elif UNDISTORT_FISHEYE and key in (ord('+'), ord('=')):
+                fisheye_k += FISHEYE_K_STEP
+                if maps_built:
+                    src_h, src_w = frame.shape[:2]
+                    undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye K = {fisheye_k:+.2f}")
+            elif UNDISTORT_FISHEYE and key in (ord('-'), ord('_')):
+                fisheye_k -= FISHEYE_K_STEP
+                if maps_built:
+                    src_h, src_w = frame.shape[:2]
+                    undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye K = {fisheye_k:+.2f}")
+            elif UNDISTORT_FISHEYE and key == ord(']'):
+                fisheye_bal = min(1.0, fisheye_bal + FISHEYE_BAL_STEP)
+                if maps_built:
+                    src_h, src_w = frame.shape[:2]
+                    undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye balance = {fisheye_bal:.2f}")
+            elif UNDISTORT_FISHEYE and key == ord('['):
+                fisheye_bal = max(0.0, fisheye_bal - FISHEYE_BAL_STEP)
+                if maps_built:
+                    src_h, src_w = frame.shape[:2]
+                    undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye balance = {fisheye_bal:.2f}")
+            else:
+                quad, changed = adjust_quad(quad, selected, key)
+                if changed:
+                    H = quad_homography(quad)
+            # If we haven't reached the target time yet, loop back
+            if time.time() < next_process_at:
+                continue
 
-        if not ret:
+        # ── Grab the latest frame ──
+        ret, frame = cap.read()
+
+        if not ret or frame is None:
             consecutive_failures += 1
             show_waiting(source_label)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
             if RTSP_URL is not None and consecutive_failures < 10:
-                time.sleep(0.05)
+                cap.wait_for_frame(timeout=0.1)
                 continue
 
             if RTSP_URL is not None:
                 print(f"\nRTSP stream lost — reconnecting in {RTSP_RECONNECT_DELAY}s ...")
                 cap.release()
                 time.sleep(RTSP_RECONNECT_DELAY)
-                cap = open_rtsp(RTSP_URL)   # new threaded wrapper
-                maps_built = False          # rebuild fisheye maps for new stream
+                cap = open_rtsp(RTSP_URL)
+                maps_built = False
                 consecutive_failures = 0
                 if not cap.isOpened():
                     print("Reconnect failed. Retrying ...")
@@ -593,6 +653,7 @@ def main():
         now = time.time()
         dt  = now - prev_time
         prev_time = now
+        next_process_at = now + frame_interval   # schedule next processing
 
         vis, detections = process_frame(frame, detector, quad, H, selected,
                                          undistort_maps)
@@ -604,7 +665,7 @@ def main():
         fps = 1.0 / dt if dt > 0 else 0
 
         display = cv2.resize(vis, (DISPLAY_W, DISPLAY_H))
-        cv2.putText(display, f"{fps:.0f} fps", (DISPLAY_W - 80, 25),
+        cv2.putText(display, f"{fps:.1f} fps", (DISPLAY_W - 100, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
         draw_quad_hud(display, selected,
                       fisheye_k if UNDISTORT_FISHEYE else None,
@@ -613,7 +674,6 @@ def main():
         cv2.resizeWindow(source_label, DISPLAY_W, DISPLAY_H)
         cv2.imshow(source_label, display)
 
-        key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
         if key in (ord('1'), ord('2'), ord('3'), ord('4')):
