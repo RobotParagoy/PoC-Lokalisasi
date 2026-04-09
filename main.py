@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 from pupil_apriltags import Detector
 import time
+import threading
 
 # ─────────────────────────────────────────────
 # CONFIGURATION  — edit these to match your setup
@@ -50,6 +51,7 @@ FISHEYE_BAL_STEP   = 0.05
 # ── RTSP-specific options ─────────────────────────────────────────────────────
 RTSP_RECONNECT_DELAY = 3
 RTSP_TRANSPORT       = "tcp"
+RTSP_SOCKET_TIMEOUT  = 10_000_000   # microseconds (10 s) — increase on slow devices
 
 TAG_FAMILY   = "tag36h11"
 
@@ -291,14 +293,96 @@ def process_frame(frame, detector, quad, H, selected, undistort_maps=None):
     return vis, detections
 
 
+# ─────────────────────────────────────────────
+# THREADED VIDEO CAPTURE  — eliminates RTSP lag
+# ─────────────────────────────────────────────
+
+class ThreadedVideoCapture:
+    """
+    Continuously grab frames from a VideoCapture in a background thread,
+    keeping only the **latest** frame.  This prevents the RTSP internal
+    buffer from filling up and causing a multi-second delay.
+    """
+
+    def __init__(self, cap):
+        self._cap   = cap
+        self._lock  = threading.Lock()
+        self._frame = None
+        self._ret   = False
+        self._running = True
+        self._thread  = threading.Thread(target=self._reader, daemon=True)
+        self._thread.start()
+
+    # ── background loop: drain the capture buffer ──────────────────────────
+    def _reader(self):
+        while self._running:
+            ret, frame = self._cap.read()
+            with self._lock:
+                self._ret   = ret
+                self._frame = frame
+            if not ret:
+                # avoid busy-spinning when the stream is down
+                time.sleep(0.01)
+
+    # ── public API (matches cv2.VideoCapture) ─────────────────────────────
+    def read(self):
+        """Return the most recent frame (never blocks on decode)."""
+        with self._lock:
+            return self._ret, self._frame
+
+    def isOpened(self):
+        return self._cap.isOpened()
+
+    def get(self, prop_id):
+        return self._cap.get(prop_id)
+
+    def set(self, prop_id, value):
+        return self._cap.set(prop_id, value)
+
+    def release(self):
+        self._running = False
+        self._thread.join(timeout=2)
+        self._cap.release()
+
+
 def open_rtsp(url):
-    """Open an RTSP stream with TCP transport for reliability."""
+    """
+    Open an RTSP stream with TCP transport.
+    Waits for the connection to actually produce a frame before
+    handing off to the threaded reader — prevents timeout on slow CPUs.
+    """
     import os
+    opts = []
     if RTSP_TRANSPORT == "tcp":
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        opts.append("rtsp_transport;tcp")
+    opts.append(f"stimeout;{RTSP_SOCKET_TIMEOUT}")   # socket-level timeout
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "|".join(opts)
+
     cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    return cap
+
+    if not cap.isOpened():
+        print("  ⚠  VideoCapture failed to open — returning raw handle.")
+        return ThreadedVideoCapture(cap)
+
+    # Warm-up: wait until the first frame actually arrives so the RTSP
+    # handshake completes on the main thread before the reader loop starts.
+    print("  Waiting for first RTSP frame (warm-up) ...")
+    warmup_deadline = time.time() + RTSP_SOCKET_TIMEOUT / 1_000_000
+    while time.time() < warmup_deadline:
+        ret, frame = cap.read()
+        if ret and frame is not None:
+            print("  First frame received — starting threaded reader.")
+            # Seed the threaded wrapper so .read() returns this frame immediately
+            wrapper = ThreadedVideoCapture(cap)
+            with wrapper._lock:
+                wrapper._ret   = True
+                wrapper._frame = frame
+            return wrapper
+        time.sleep(0.1)
+
+    print("  ⚠  Warm-up timed out — starting threaded reader anyway.")
+    return ThreadedVideoCapture(cap)
 
 
 def show_waiting(window_name):
@@ -313,8 +397,8 @@ def show_waiting(window_name):
 def main():
     detector = Detector(
         families=TAG_FAMILY,
-        nthreads=4,
-        quad_decimate=1.5,
+        nthreads=2,              # match low-core CPUs (2-core Intel)
+        quad_decimate=2.0,       # faster detection (trades slight accuracy)
         quad_sigma=0.0,
         refine_edges=1,
         decode_sharpening=0.25,
@@ -408,17 +492,18 @@ def main():
     # ── RTSP stream mode ──
     if RTSP_URL is not None:
         print(f"Connecting to RTSP stream: {RTSP_URL}")
-        cap = open_rtsp(RTSP_URL)
+        cap = open_rtsp(RTSP_URL)          # already threaded
         source_label = "Robot Tracker — RTSP"
-        print("RTSP stream opened — press 'q' to quit.")
+        print("RTSP stream opened (threaded reader) — press 'q' to quit.")
     else:
-        cap = cv2.VideoCapture(CAMERA_INDEX)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
-        cap.set(cv2.CAP_PROP_FPS,          TARGET_FPS)
-        cap.set(cv2.CAP_PROP_BRIGHTNESS,   BRIGHTNESS)
+        raw_cap = cv2.VideoCapture(CAMERA_INDEX)
+        raw_cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
+        raw_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
+        raw_cap.set(cv2.CAP_PROP_FPS,          TARGET_FPS)
+        raw_cap.set(cv2.CAP_PROP_BRIGHTNESS,   BRIGHTNESS)
+        cap = ThreadedVideoCapture(raw_cap)   # wrap USB cam too
         source_label = "Robot Tracker"
-        print("Starting USB camera — press 'q' to quit.")
+        print("Starting USB camera (threaded reader) — press 'q' to quit.")
 
     quad                 = [list(c) for c in FIELD_QUAD]
     H                    = quad_homography(quad)
@@ -435,9 +520,21 @@ def main():
     fisheye_bal      = FISHEYE_BALANCE
     undistort_maps   = None
     maps_built       = False      # build maps lazily after first frame arrives
+    prev_frame_id    = None       # used to skip duplicate frames from the reader
 
     while True:
         ret, frame = cap.read()
+
+        # Skip if the threaded reader returned the exact same object (no new frame yet)
+        if ret and frame is not None and frame is prev_frame_id:
+            time.sleep(0.005)   # yield CPU briefly
+            # still process key events so UI stays responsive
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            continue
+        if ret and frame is not None:
+            prev_frame_id = frame
 
         if not ret:
             consecutive_failures += 1
@@ -453,12 +550,13 @@ def main():
                 print(f"\nRTSP stream lost — reconnecting in {RTSP_RECONNECT_DELAY}s ...")
                 cap.release()
                 time.sleep(RTSP_RECONNECT_DELAY)
-                cap = open_rtsp(RTSP_URL)
+                cap = open_rtsp(RTSP_URL)   # new threaded wrapper
+                maps_built = False          # rebuild fisheye maps for new stream
                 consecutive_failures = 0
                 if not cap.isOpened():
                     print("Reconnect failed. Retrying ...")
                 else:
-                    print("Reconnected.")
+                    print("Reconnected (threaded reader).")
             else:
                 print("Camera read failed.")
                 break
