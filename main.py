@@ -16,6 +16,7 @@ import numpy as np
 from pupil_apriltags import Detector
 import time
 import threading
+import math
 
 # ─────────────────────────────────────────────
 # CONFIGURATION  — edit these to match your setup
@@ -43,8 +44,8 @@ DISPLAY_H    = 540
 # and    FISHEYE_BALANCE (0 = crop all black edges, 1 = keep entire image).
 # You can also tune live with '+'/'-' (K) and '['/']' (balance).
 UNDISTORT_FISHEYE  = True
-FISHEYE_K          = -0.35        # k1 coefficient (negative = barrel correction)
-FISHEYE_BALANCE    = 0.75          # 0.0 – 1.0
+FISHEYE_K          = -0.5        # k1 coefficient (negative = barrel correction)
+FISHEYE_BALANCE    = 0.9          # 0.0 – 1.0
 FISHEYE_K_STEP     = 0.05         # step per keypress
 FISHEYE_BAL_STEP   = 0.05
 
@@ -63,7 +64,7 @@ GRID_ROWS = 4
 # Four corners of the playing field — adjust each independently.
 # Order: TL, TR, BR, BL  (top-left, top-right, bottom-right, bottom-left)
 # Adjust live while running with keys (see HUD in bottom-left of window).
-FIELD_QUAD = [[260, 150], [2110, 220], [2080, 1140], [220, 1080]]
+FIELD_QUAD = [[370, 200], [2070, 240], [2040, 1110], [330, 1040]]
 QUAD_STEP = 10   # pixels per keypress
 
 DOCKING_TAGS = {100: "docking1", 101: "docking2"}
@@ -91,10 +92,12 @@ def quad_homography(quad):
 
 
 def pixel_to_field(px, py, H):
-    """Map full-res pixel coords to grid (col, row) using perspective transform H."""
+    """Map full-res pixel coords to box index (col, row) using perspective transform H.
+    Col: 0 – (GRID_COLS-1),  Row: 0 – (GRID_ROWS-1)
+    """
     pt = cv2.perspectiveTransform(np.array([[[px, py]]], dtype=np.float32), H)[0][0]
-    col = int(round(max(0, min(GRID_COLS, pt[0]))))
-    row = int(round(max(0, min(GRID_ROWS, pt[1]))))
+    col = int(max(0, min(GRID_COLS - 1, pt[0])))            # 0 (left) → 7 (right)
+    row = GRID_ROWS - 1 - int(max(0, min(GRID_ROWS - 1, pt[1])))  # 0 (bottom) → 3 (top)
     return col, row
 
 
@@ -162,6 +165,17 @@ def build_undistort_maps(frame_w, frame_h, k1, balance):
     return map1, map2
 
 
+def tag_orientation(corners):
+    """Return tag orientation in whole degrees (0–359).
+    Computed from the vector between corner[0] and corner[1] (left → right edge).
+    0° = facing right, 90° = facing down, 180° = facing left, 270° = facing up.
+    """
+    dx = corners[1][0] - corners[0][0]
+    dy = corners[1][1] - corners[0][1]
+    angle = math.degrees(math.atan2(dy, dx))   # -180 to +180
+    return int(angle % 360)                     # normalise to 0–359
+
+
 def undistort_frame(frame, map1, map2):
     """Apply precomputed fisheye undistortion maps to a frame."""
     return cv2.remap(frame, map1, map2,
@@ -210,7 +224,8 @@ def draw_overlay(frame, detections, quad, H, selected):
         cv2.polylines(overlay, [corn.reshape(-1, 1, 2)], True, color, 2)
 
         col, row = pixel_to_field(det.center[0], det.center[1], H)
-        label = f"{label} [{col},{row}]"
+        orient = tag_orientation(det.corners)
+        label = f"{label} [{col},{row}] {orient}°"
 
         cv2.putText(overlay, label, (ctr[0] - 20, ctr[1] - 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
@@ -250,8 +265,8 @@ def log_positions(detections, H, timestamp_ms=None):
 
     ts = f"  t = {timestamp_ms:.0f} ms" if timestamp_ms is not None else ""
     print(f"── Detected Tags {ts}")
-    print(f"  {'ID':>4}  {'Name':<16}  {'Type':<8}  {'Pixel (x,y)':>18}  {'Grid (col,row)':>14}")
-    print("  " + "─" * 70)
+    print(f"  {'ID':>4}  {'Name':<16}  {'Type':<8}  {'Pixel (x,y)':>18}  {'Grid (col,row)':>14}  {'Orient':>6}")
+    print("  " + "─" * 80)
 
     for det in sorted(detections, key=lambda d: d.tag_id):
         tid = det.tag_id
@@ -268,10 +283,11 @@ def log_positions(detections, H, timestamp_ms=None):
 
         col, row = pixel_to_field(px, py, H)
         grid_str = f"({col}, {row})"
+        orient   = tag_orientation(det.corners)
 
-        print(f"  {tid:>4}  {name:<16}  {tag_type:<8}  ({px:6.0f}, {py:6.0f})  {grid_str:>14}")
+        print(f"  {tid:>4}  {name:<16}  {tag_type:<8}  ({px:6.0f}, {py:6.0f})  {grid_str:>14}  {orient:>5}°")
 
-    print("─" * 72)
+    print("─" * 82)
 
 
 # ─────────────────────────────────────────────
