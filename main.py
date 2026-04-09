@@ -30,14 +30,14 @@ import time
 #   • Set RTSP_URL to an RTSP address to stream from an IP camera / NVR.
 #   • Set TEST_VIDEO to a file path to replay a recorded video.
 #   • Otherwise the USB camera at CAMERA_INDEX is used.
-RTSP_URL     = "rtsp://admin:password@192.168.1.100:554/stream1"  # ← edit this
+RTSP_URL     = "rtsp://admin:admin@192.168.0.172:8554/Streaming/Channels/101"  # ← edit this
 TEST_VIDEO   = None       # e.g. "field.mp4"
 CAMERA_INDEX = 1          # USB camera fallback
 
 # ── Camera / stream settings ──────────────────────────────────────────────────
 FRAME_W      = 1280
 FRAME_H      = 720
-TARGET_FPS   = 60         # request fps (USB cam only; RTSP uses source fps)
+TARGET_FPS   = 1         # request fps (USB cam only; RTSP uses source fps)
 BRIGHTNESS   = 120        # camera brightness (USB cam only)
 CONTRAST     = 1.3        # contrast multiplier applied in software
 
