@@ -674,6 +674,7 @@ def main():
         cv2.resizeWindow(source_label, DISPLAY_W, DISPLAY_H)
         cv2.imshow(source_label, display)
 
+        key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
         if key in (ord('1'), ord('2'), ord('3'), ord('4')):
