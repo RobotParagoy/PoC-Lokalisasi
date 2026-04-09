@@ -36,6 +36,17 @@ CONTRAST     = 1.3
 DISPLAY_W    = 960
 DISPLAY_H    = 540
 
+# ── Fisheye undistortion ──────────────────────────────────────────────────────
+# Set UNDISTORT_FISHEYE = True to correct barrel / fisheye distortion.
+# Adjust FISHEYE_K  (radial strength — larger = stronger correction)
+# and    FISHEYE_BALANCE (0 = crop all black edges, 1 = keep entire image).
+# You can also tune live with '+'/'-' (K) and '['/']' (balance).
+UNDISTORT_FISHEYE  = True
+FISHEYE_K          = -0.35        # k1 coefficient (negative = barrel correction)
+FISHEYE_BALANCE    = 0.75          # 0.0 – 1.0
+FISHEYE_K_STEP     = 0.05         # step per keypress
+FISHEYE_BAL_STEP   = 0.05
+
 # ── RTSP-specific options ─────────────────────────────────────────────────────
 RTSP_RECONNECT_DELAY = 3
 RTSP_TRANSPORT       = "tcp"
@@ -106,6 +117,57 @@ def adjust_quad(quad, selected, key):
 
 
 # ─────────────────────────────────────────────
+# FISHEYE UNDISTORTION
+# ─────────────────────────────────────────────
+
+def build_undistort_maps(frame_w, frame_h, k1, balance):
+    """
+    Pre-compute the undistortion + rectification maps for a fisheye lens.
+
+    Parameters
+    ----------
+    frame_w, frame_h : int
+        Resolution of the incoming frames.
+    k1 : float
+        Radial distortion coefficient (negative corrects barrel distortion).
+    balance : float  (0.0 – 1.0)
+        0 = crop all black borders, 1 = keep the full undistorted image.
+
+    Returns
+    -------
+    map1, map2 : ndarray
+        Remap look-up tables usable with cv2.remap().
+    """
+    # Approximate camera matrix (principal point at centre, focal ≈ width)
+    fx = fy = frame_w
+    cx, cy  = frame_w / 2.0, frame_h / 2.0
+    K = np.array([[fx,  0, cx],
+                  [ 0, fy, cy],
+                  [ 0,  0,  1]], dtype=np.float64)
+
+    D = np.array([k1, 0.0, 0.0, 0.0], dtype=np.float64)   # k1, k2, k3, k4
+
+    dim = (frame_w, frame_h)
+
+    # New camera matrix that controls how much of the corrected image is shown
+    new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
+        K, D, dim, np.eye(3), balance=balance
+    )
+
+    map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+        K, D, np.eye(3), new_K, dim, cv2.CV_16SC2
+    )
+    return map1, map2
+
+
+def undistort_frame(frame, map1, map2):
+    """Apply precomputed fisheye undistortion maps to a frame."""
+    return cv2.remap(frame, map1, map2,
+                     interpolation=cv2.INTER_LINEAR,
+                     borderMode=cv2.BORDER_CONSTANT)
+
+
+# ─────────────────────────────────────────────
 # VISUALISATION OVERLAY
 # ─────────────────────────────────────────────
 
@@ -155,8 +217,8 @@ def draw_overlay(frame, detections, quad, H, selected):
     return cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
 
 
-def draw_quad_hud(display, selected):
-    """Draw corner-selection + move key reference."""
+def draw_quad_hud(display, selected, fisheye_k=None, fisheye_bal=None):
+    """Draw corner-selection + move key reference (+ fisheye info)."""
     lines = [
         "Field quad adjust:",
         "1/2/3/4  select corner",
@@ -166,6 +228,11 @@ def draw_quad_hud(display, selected):
         "a/d  move left/right",
         f"Active: {selected+1} {CORNER_NAMES[selected]}",
     ]
+    if fisheye_k is not None:
+        lines.append("")
+        lines.append("Fisheye correction:")
+        lines.append(f"  +/-   K = {fisheye_k:+.2f}")
+        lines.append(f"  [/]   balance = {fisheye_bal:.2f}")
     x = 10
     y = DISPLAY_H - 10 - len(lines) * 18
     for i, line in enumerate(lines):
@@ -213,8 +280,10 @@ def apply_contrast(frame, contrast):
     return cv2.convertScaleAbs(frame, alpha=contrast, beta=0)
 
 
-def process_frame(frame, detector, quad, H, selected):
-    """Detect tags, return (vis, detections)."""
+def process_frame(frame, detector, quad, H, selected, undistort_maps=None):
+    """Detect tags, return (vis, detections).  Optionally undistort first."""
+    if undistort_maps is not None:
+        frame = undistort_frame(frame, *undistort_maps)
     frame = apply_contrast(frame, CONTRAST)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detections = detector.detect(gray)
@@ -267,20 +336,33 @@ def main():
         last_log_ms  = -9999
         LOG_INTERVAL = 500
 
+        # Fisheye undistortion maps (precomputed once, rebuilt on param change)
+        fisheye_k   = FISHEYE_K
+        fisheye_bal = FISHEYE_BALANCE
+        undistort_maps = None
+        if UNDISTORT_FISHEYE:
+            src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or FRAME_W
+            src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or FRAME_H
+            undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+            print(f"Fisheye undistortion ON  K={fisheye_k:.2f}  balance={fisheye_bal:.2f}")
+
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
             pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-            vis, detections = process_frame(frame, detector, quad, H, selected)
+            vis, detections = process_frame(frame, detector, quad, H, selected,
+                                            undistort_maps)
 
             if pos_ms - last_log_ms >= LOG_INTERVAL:
                 log_positions(detections, H, timestamp_ms=pos_ms)
                 last_log_ms = pos_ms
 
             display = cv2.resize(vis, (DISPLAY_W, DISPLAY_H))
-            draw_quad_hud(display, selected)
+            draw_quad_hud(display, selected,
+                          fisheye_k if UNDISTORT_FISHEYE else None,
+                          fisheye_bal if UNDISTORT_FISHEYE else None)
             cv2.namedWindow("Robot Tracker — Video", cv2.WINDOW_NORMAL)
             cv2.resizeWindow("Robot Tracker — Video", DISPLAY_W, DISPLAY_H)
             cv2.imshow("Robot Tracker — Video", display)
@@ -290,6 +372,30 @@ def main():
                 break
             if key in (ord('1'), ord('2'), ord('3'), ord('4')):
                 selected = key - ord('1')
+            elif UNDISTORT_FISHEYE and key in (ord('+'), ord('=')):
+                fisheye_k += FISHEYE_K_STEP
+                src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or FRAME_W
+                src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or FRAME_H
+                undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye K = {fisheye_k:+.2f}")
+            elif UNDISTORT_FISHEYE and key in (ord('-'), ord('_')):
+                fisheye_k -= FISHEYE_K_STEP
+                src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or FRAME_W
+                src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or FRAME_H
+                undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye K = {fisheye_k:+.2f}")
+            elif UNDISTORT_FISHEYE and key == ord(']'):
+                fisheye_bal = min(1.0, fisheye_bal + FISHEYE_BAL_STEP)
+                src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or FRAME_W
+                src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or FRAME_H
+                undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye balance = {fisheye_bal:.2f}")
+            elif UNDISTORT_FISHEYE and key == ord('['):
+                fisheye_bal = max(0.0, fisheye_bal - FISHEYE_BAL_STEP)
+                src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or FRAME_W
+                src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or FRAME_H
+                undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+                print(f"Fisheye balance = {fisheye_bal:.2f}")
             else:
                 quad, changed = adjust_quad(quad, selected, key)
                 if changed:
@@ -324,6 +430,12 @@ def main():
     consecutive_failures = 0
     first_frame          = True
 
+    # Fisheye undistortion state
+    fisheye_k        = FISHEYE_K
+    fisheye_bal      = FISHEYE_BALANCE
+    undistort_maps   = None
+    maps_built       = False      # build maps lazily after first frame arrives
+
     while True:
         ret, frame = cap.read()
 
@@ -356,12 +468,20 @@ def main():
             print("First frame received — stream is live.")
             first_frame = False
 
+        # Build fisheye maps once we know the actual frame size
+        if UNDISTORT_FISHEYE and not maps_built:
+            src_h, src_w = frame.shape[:2]
+            undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+            maps_built = True
+            print(f"Fisheye undistortion ON  K={fisheye_k:.2f}  balance={fisheye_bal:.2f}")
+
         consecutive_failures = 0
         now = time.time()
         dt  = now - prev_time
         prev_time = now
 
-        vis, detections = process_frame(frame, detector, quad, H, selected)
+        vis, detections = process_frame(frame, detector, quad, H, selected,
+                                         undistort_maps)
 
         if now - last_log_t >= LOG_INTERVAL:
             log_positions(detections, H)
@@ -372,7 +492,9 @@ def main():
         display = cv2.resize(vis, (DISPLAY_W, DISPLAY_H))
         cv2.putText(display, f"{fps:.0f} fps", (DISPLAY_W - 80, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-        draw_quad_hud(display, selected)
+        draw_quad_hud(display, selected,
+                      fisheye_k if UNDISTORT_FISHEYE else None,
+                      fisheye_bal if UNDISTORT_FISHEYE else None)
         cv2.namedWindow(source_label, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(source_label, DISPLAY_W, DISPLAY_H)
         cv2.imshow(source_label, display)
@@ -382,6 +504,26 @@ def main():
             break
         if key in (ord('1'), ord('2'), ord('3'), ord('4')):
             selected = key - ord('1')
+        elif UNDISTORT_FISHEYE and key in (ord('+'), ord('=')):
+            fisheye_k += FISHEYE_K_STEP
+            src_h, src_w = frame.shape[:2]
+            undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+            print(f"Fisheye K = {fisheye_k:+.2f}")
+        elif UNDISTORT_FISHEYE and key in (ord('-'), ord('_')):
+            fisheye_k -= FISHEYE_K_STEP
+            src_h, src_w = frame.shape[:2]
+            undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+            print(f"Fisheye K = {fisheye_k:+.2f}")
+        elif UNDISTORT_FISHEYE and key == ord(']'):
+            fisheye_bal = min(1.0, fisheye_bal + FISHEYE_BAL_STEP)
+            src_h, src_w = frame.shape[:2]
+            undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+            print(f"Fisheye balance = {fisheye_bal:.2f}")
+        elif UNDISTORT_FISHEYE and key == ord('['):
+            fisheye_bal = max(0.0, fisheye_bal - FISHEYE_BAL_STEP)
+            src_h, src_w = frame.shape[:2]
+            undistort_maps = build_undistort_maps(src_w, src_h, fisheye_k, fisheye_bal)
+            print(f"Fisheye balance = {fisheye_bal:.2f}")
         else:
             quad, changed = adjust_quad(quad, selected, key)
             if changed:
@@ -391,6 +533,8 @@ def main():
     cv2.destroyAllWindows()
     print(f"\nFinal quad config:")
     print(f"FIELD_QUAD = {quad}")
+    if UNDISTORT_FISHEYE:
+        print(f"Final fisheye  K = {fisheye_k:+.2f}   balance = {fisheye_bal:.2f}")
 
 
 if __name__ == "__main__":
