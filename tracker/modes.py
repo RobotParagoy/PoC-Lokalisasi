@@ -14,6 +14,8 @@ from tracker.fisheye import build_undistort_maps
 from tracker.overlay import draw_quad_hud, log_positions
 from tracker.processing import process_frame, make_state, handle_keypress
 from tracker.capture import open_rtsp, open_video_source, show_waiting
+from tracker.grid import log_grid
+from tracker.mqtt import mqtt_connect, mqtt_publish_grid, mqtt_disconnect
 
 
 def run_video_mode(detector):
@@ -25,6 +27,8 @@ def run_video_mode(detector):
 
     fps_video = cap.get(cv2.CAP_PROP_FPS) or 30
     print(f"Playing: {TEST_VIDEO}  ({fps_video:.0f} fps)  —  press 'q' to quit")
+
+    mqtt_connect()
 
     state = make_state()
     state['H'] = quad_homography(state['quad'])
@@ -45,11 +49,14 @@ def run_video_mode(detector):
             break
 
         pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-        vis, detections = process_frame(frame, detector, state['quad'], state['H'],
-                                        state['selected'], state['undistort_maps'])
+        vis, detections, matrix, coord_dict = process_frame(
+            frame, detector, state['quad'], state['H'],
+            state['selected'], state['undistort_maps'])
 
         if pos_ms - last_log_ms >= LOG_INTERVAL:
             log_positions(detections, state['H'], timestamp_ms=pos_ms)
+            log_grid(matrix, coord_dict)
+            mqtt_publish_grid(coord_dict)
             last_log_ms = pos_ms
 
         display = cv2.resize(vis, (DISPLAY_W, DISPLAY_H))
@@ -66,11 +73,14 @@ def run_video_mode(detector):
 
     cap.release()
     cv2.destroyAllWindows()
+    mqtt_disconnect()
 
 
 def run_stream_mode(detector):
     """Run the tracker against RTSP or USB camera."""
     cap, source_label = open_video_source()
+
+    mqtt_connect()
 
     state = make_state()
     state['H'] = quad_homography(state['quad'])
@@ -140,11 +150,14 @@ def run_stream_mode(detector):
         prev_time = now
         next_process_at = now + frame_interval
 
-        vis, detections = process_frame(frame, detector, state['quad'], state['H'],
-                                        state['selected'], state['undistort_maps'])
+        vis, detections, matrix, coord_dict = process_frame(
+            frame, detector, state['quad'], state['H'],
+            state['selected'], state['undistort_maps'])
 
         if now - last_log_t >= LOG_INTERVAL:
             log_positions(detections, state['H'])
+            log_grid(matrix, coord_dict)
+            mqtt_publish_grid(coord_dict)
             last_log_t = now
 
         fps = 1.0 / dt if dt > 0 else 0
@@ -165,6 +178,7 @@ def run_stream_mode(detector):
 
     cap.release()
     cv2.destroyAllWindows()
+    mqtt_disconnect()
     print(f"\nFinal quad config:")
     print(f"FIELD_QUAD = {state['quad']}")
     if UNDISTORT_FISHEYE:

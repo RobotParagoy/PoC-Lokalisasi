@@ -9,6 +9,7 @@ from tracker.config import (
 from tracker.field import quad_homography, adjust_quad
 from tracker.fisheye import build_undistort_maps, undistort_frame
 from tracker.overlay import draw_overlay
+from tracker.grid import build_grid, draw_grid
 
 
 def apply_contrast(frame, contrast):
@@ -17,14 +18,19 @@ def apply_contrast(frame, contrast):
 
 
 def process_frame(frame, detector, quad, H, selected, undistort_maps=None):
-    """Detect tags and return (visualised_frame, detections)."""
+    """Detect tags and return (visualised_frame, detections, matrix, coord_dict)."""
     if undistort_maps is not None:
         frame = undistort_frame(frame, *undistort_maps)
     frame = apply_contrast(frame, CONTRAST)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detections = detector.detect(gray)
+
+    # build occupancy grid
+    matrix, coord_dict = build_grid(detections, H)
+
     vis = draw_overlay(frame, detections, quad, H, selected)
-    return vis, detections
+    vis = draw_grid(vis, matrix, H)
+    return vis, detections, matrix, coord_dict
 
 
 def make_state():

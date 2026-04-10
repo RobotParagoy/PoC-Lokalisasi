@@ -22,7 +22,7 @@ def pixel_to_field(px, py, H):
     """Map full-res pixel coords to grid index (col, row)."""
     pt = cv2.perspectiveTransform(np.array([[[px, py]]], dtype=np.float32), H)[0][0]
     col = int(max(0, min(GRID_COLS - 1, pt[0])))
-    row = GRID_ROWS - 1 - int(max(0, min(GRID_ROWS - 1, pt[1])))
+    row = int(max(0, min(GRID_ROWS - 1, pt[1])))
     return col, row
 
 

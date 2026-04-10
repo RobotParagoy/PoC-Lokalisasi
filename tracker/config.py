@@ -47,3 +47,8 @@ ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 582: "Item 3", 583: "Item 4",
                 585: "Item 5", 586: "Item 6", 584: "Item 7", 576: "Item 8"}
 
 CORNER_NAMES = ["TL", "TR", "BR", "BL"]
+
+# ── MQTT Settings ──
+MQTT_BROKER  = "192.168.0.142"
+MQTT_PORT    = 1883
+MQTT_TOPIC   = "/local"
