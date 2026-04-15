@@ -20,7 +20,7 @@ import numpy as np
 
 from tracker.config import GRID_COLS, GRID_ROWS, ROBOT_TAGS, ITEM_TAGS
 from tracker.field import pixel_to_field
-from tracker.tags import classify_tag
+from tracker.tags import classify_tag, tag_orientation
 
 # ── Cell value constants ─────────────────────────────────────────────────────
 CELL_EMPTY   = 0
@@ -67,11 +67,13 @@ _LABEL = {
 def build_grid(detections, H):
     """Return (matrix, coord_dict) for the current frame.
 
-    matrix   — list[row][col]   (row-major, 4 × 8) — cell type constants for drawing
-    coord_dict — { "(col,row)": tag_id, … }  ready for JSON serialisation (0 if empty)
+    matrix   — list[row][col]   (row-major, 4 × 8)
+    coord_dict — { "(col,row)": value, … }  ready for JSON serialisation
+      value is 0 for empty, 4 for docking placeholder,
+      or [tag_id, angle_deg] for cells with a detected AprilTag.
     """
     matrix = [[CELL_EMPTY] * GRID_COLS for _ in range(GRID_ROWS)]
-    tag_ids = [[0] * GRID_COLS for _ in range(GRID_ROWS)]  # AprilTag IDs for MQTT
+    cell_det = {}  # (col, row) -> detection object
 
     # permanent docking cells
     for c, r in DOCKING_CELLS:
@@ -86,14 +88,21 @@ def build_grid(detections, H):
 
         if tid in ROBOT_TAGS:
             matrix[row][col] = CELL_ROBOT
+            cell_det[(col, row)] = det
         elif tid in ITEM_TAGS:
             matrix[row][col] = CELL_GOODS
+            cell_det[(col, row)] = det
         # docking tags keep their CELL_DOCKING value
 
     coord_dict = {}
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
-            coord_dict[f"({c},{r})"] = tag_ids[r][c]  # publish tag ID (0 if empty)
+            det = cell_det.get((c, r))
+            if det is not None:
+                angle = tag_orientation(det.corners)
+                coord_dict[f"({c},{r})"] = [det.tag_id, angle]
+            else:
+                coord_dict[f"({c},{r})"] = matrix[r][c]
 
     return matrix, coord_dict
 
