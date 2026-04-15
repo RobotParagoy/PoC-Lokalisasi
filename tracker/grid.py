@@ -67,10 +67,11 @@ _LABEL = {
 def build_grid(detections, H):
     """Return (matrix, coord_dict) for the current frame.
 
-    matrix   — list[row][col]   (row-major, 4 × 8)
-    coord_dict — { "(col,row)": value, … }  ready for JSON serialisation
+    matrix   — list[row][col]   (row-major, 4 × 8) — cell type constants for drawing
+    coord_dict — { "(col,row)": tag_id, … }  ready for JSON serialisation (0 if empty)
     """
     matrix = [[CELL_EMPTY] * GRID_COLS for _ in range(GRID_ROWS)]
+    tag_ids = [[0] * GRID_COLS for _ in range(GRID_ROWS)]  # AprilTag IDs for MQTT
 
     # permanent docking cells
     for c, r in DOCKING_CELLS:
@@ -81,6 +82,8 @@ def build_grid(detections, H):
         tid = det.tag_id
         col, row = pixel_to_field(det.center[0], det.center[1], H)
 
+        tag_ids[row][col] = tid  # store the actual tag ID
+
         if tid in ROBOT_TAGS:
             matrix[row][col] = CELL_ROBOT
         elif tid in ITEM_TAGS:
@@ -90,7 +93,7 @@ def build_grid(detections, H):
     coord_dict = {}
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
-            coord_dict[f"({c},{r})"] = matrix[r][c]
+            coord_dict[f"({c},{r})"] = tag_ids[r][c]  # publish tag ID (0 if empty)
 
     return matrix, coord_dict
 
