@@ -84,8 +84,6 @@ def build_grid(detections, H):
         tid = det.tag_id
         col, row = pixel_to_field(det.center[0], det.center[1], H)
 
-        tag_ids[row][col] = tid  # store the actual tag ID
-
         if tid in ROBOT_TAGS:
             matrix[row][col] = CELL_ROBOT
             cell_det[(col, row)] = det
