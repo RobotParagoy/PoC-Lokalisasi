@@ -18,8 +18,11 @@ import json
 import cv2
 import numpy as np
 
-from tracker.config import GRID_COLS, GRID_ROWS, ROBOT_TAGS, ITEM_TAGS
-from tracker.field import pixel_to_field
+from tracker.config import (
+    GRID_COLS, GRID_ROWS, ROBOT_TAGS, ITEM_TAGS,
+    DETECTION_ZONE_RATIO, FISHEYE_EDGE_SHRINK,
+)
+from tracker.field import pixel_to_field, pixel_to_field_continuous
 from tracker.tags import classify_tag, tag_orientation
 
 # ── Cell value constants ─────────────────────────────────────────────────────
@@ -80,9 +83,27 @@ def build_grid(detections, H):
         matrix[r][c] = CELL_DOCKING
 
     # populate from detections
+    _margin = (1.0 - DETECTION_ZONE_RATIO) / 2.0  # dead-band on each side
+
     for det in detections:
         tid = det.tag_id
-        col, row = pixel_to_field(det.center[0], det.center[1], H)
+        gx, gy = pixel_to_field_continuous(det.center[0], det.center[1], H)
+
+        col = int(gx)
+        row = int(gy)
+        col = max(0, min(GRID_COLS - 1, col))
+        row = max(0, min(GRID_ROWS - 1, row))
+
+        # fractional position within the cell (0 = left/top edge, 1 = right/bottom edge)
+        fx = gx - col
+        fy = gy - row
+
+        # only register when the tag centre is within the inner hot-zone
+        in_center = (_margin <= fx <= 1.0 - _margin) and \
+                    (_margin <= fy <= 1.0 - _margin)
+
+        if not in_center:
+            continue  # tag is near a cell boundary — skip
 
         if tid in ROBOT_TAGS:
             matrix[row][col] = CELL_ROBOT
@@ -133,18 +154,22 @@ def log_grid(matrix, coord_dict):
 # Drawing helpers
 # ═════════════════════════════════════════════════════════════════════════════
 
-def _cell_corners_px(col, row, H_inv):
+def _cell_corners_px(col, row, H_inv, ratio=1.0):
     """Map one grid cell (col, row) → 4 pixel-space corners via inverse H.
+
+    ratio < 1.0 shrinks the rectangle symmetrically toward the cell centre,
+    which is used to draw the inner detection hot-zone.
 
     Row 0 = top of image, Row GRID_ROWS-1 = bottom.
     Grid-space rectangle for (col, row):
         x ∈ [col, col+1]
         y ∈ [row, row+1]
     """
-    gy_top = row
-    gy_bot = row + 1
-    gx_l   = col
-    gx_r   = col + 1
+    pad = (1.0 - ratio) / 2.0
+    gy_top = row       + pad
+    gy_bot = row + 1.0 - pad
+    gx_l   = col       + pad
+    gx_r   = col + 1.0 - pad
 
     pts = np.array([
         [[gx_l, gy_top]],
@@ -157,33 +182,57 @@ def _cell_corners_px(col, row, H_inv):
 
 
 def draw_grid(frame, matrix, H):
-    """Draw coloured bounding boxes for every cell onto *frame* (in-place blend)."""
+    """Draw coloured bounding boxes for every cell onto *frame* (in-place blend).
+
+    Each cell gets:
+    • A full-cell border (thin) showing the grid layout.
+    • An inner hot-zone box (thick, filled when occupied) that reflects
+      DETECTION_ZONE_RATIO.  Cells farther from the image centre receive
+      an additional shrink (FISHEYE_EDGE_SHRINK) to compensate for the
+      fisheye lens making edge objects appear larger than they are.
+    """
     H_inv = np.linalg.inv(H)
     overlay = frame.copy()
+
+    fh, fw = frame.shape[:2]
+    img_cx, img_cy = fw / 2.0, fh / 2.0
+    # maximum possible distance from image centre to a corner
+    max_dist = np.hypot(img_cx, img_cy)
 
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             val  = matrix[r][c]
-            corn = _cell_corners_px(c, r, H_inv)
-            pts  = corn.reshape((-1, 1, 2))
 
-            # translucent fill for non-empty cells
+            # ── full-cell outline ────────────────────────────────────────
+            full_corn = _cell_corners_px(c, r, H_inv, ratio=1.0)
+            full_pts  = full_corn.reshape((-1, 1, 2))
+            cv2.polylines(overlay, [full_pts], True, _CLR_GRID, 1)
+
+            # ── fisheye-compensated hot-zone ratio ───────────────────────
+            cx_px, cy_px = full_corn.mean(axis=0)
+            radial = np.hypot(cx_px - img_cx, cy_px - img_cy) / max_dist
+            zone_ratio = DETECTION_ZONE_RATIO * (1.0 - FISHEYE_EDGE_SHRINK * radial)
+            zone_ratio = float(np.clip(zone_ratio, 0.15, 1.0))
+
+            # ── inner hot-zone box ───────────────────────────────────────
+            zone_corn = _cell_corners_px(c, r, H_inv, ratio=zone_ratio)
+            zone_pts  = zone_corn.reshape((-1, 1, 2))
+
             fill = _FILL.get(val)
             if fill is not None:
-                cv2.fillPoly(overlay, [pts], fill)
+                cv2.fillPoly(overlay, [zone_pts], fill)
 
-            # cell border
             thickness = 2 if val != CELL_EMPTY else 1
-            cv2.polylines(overlay, [pts], True, _BORDER[val], thickness)
+            cv2.polylines(overlay, [zone_pts], True, _BORDER[val], thickness)
 
-            # coordinate + value label at cell centre
-            cx, cy = corn.mean(axis=0).astype(int)
+            # ── coordinate + value label at cell centre ──────────────────
+            lcx, lcy = full_corn.mean(axis=0).astype(int)
             cv2.putText(overlay, f"({c},{r})",
-                        (cx - 18, cy - 4),
+                        (lcx - 18, lcy - 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.30,
                         (255, 255, 255), 1, cv2.LINE_AA)
             cv2.putText(overlay, _LABEL.get(val, str(val)),
-                        (cx - 10, cy + 12),
+                        (lcx - 10, lcy + 12),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35,
                         (255, 255, 255), 1, cv2.LINE_AA)
 

@@ -26,6 +26,14 @@ def pixel_to_field(px, py, H):
     return col, row
 
 
+def pixel_to_field_continuous(px, py, H):
+    """Map full-res pixel coords to continuous grid coordinates (float gx, gy)."""
+    pt = cv2.perspectiveTransform(np.array([[[px, py]]], dtype=np.float32), H)[0][0]
+    gx = float(np.clip(pt[0], 0.0, GRID_COLS))
+    gy = float(np.clip(pt[1], 0.0, GRID_ROWS))
+    return gx, gy
+
+
 def adjust_quad(quad, selected, key):
     """Move the selected corner with w/a/s/d."""
     dx, dy = 0, 0
