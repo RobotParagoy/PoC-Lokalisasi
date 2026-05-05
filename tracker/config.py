@@ -37,9 +37,9 @@ GRID_COLS = 8
 GRID_ROWS = 4
 
 # ── Detection Zone ──
-# Fraction (0–1) of each cell's width/height that counts as "occupied".
-# 0.5 means only the centre 50 % of the cell triggers a detection.
-DETECTION_ZONE_RATIO = 0.5
+# Fraction (0–1) of each cell's width/height used for the visual hot-zone box.
+# Detection itself uses nearest-cell-centre assignment (no dead zones).
+DETECTION_ZONE_RATIO = 0.75
 
 # Extra shrink applied to the drawn hot-zone at the image edge vs. centre.
 # 0.0 = no correction; 0.4 = 40 % extra shrink at the far edge.

@@ -83,27 +83,20 @@ def build_grid(detections, H):
         matrix[r][c] = CELL_DOCKING
 
     # populate from detections
-    _margin = (1.0 - DETECTION_ZONE_RATIO) / 2.0  # dead-band on each side
+    # Strategy: nearest-cell-centre assignment.
+    # The tag is assigned to the cell whose centre is closest in grid space.
+    # This guarantees exactly one cell is always active — no dead zones —
+    # while still requiring the robot to cross the mid-line between cells
+    # before the assignment switches (equivalent to Voronoi regions).
 
     for det in detections:
         tid = det.tag_id
         gx, gy = pixel_to_field_continuous(det.center[0], det.center[1], H)
 
-        col = int(gx)
-        row = int(gy)
-        col = max(0, min(GRID_COLS - 1, col))
-        row = max(0, min(GRID_ROWS - 1, row))
-
-        # fractional position within the cell (0 = left/top edge, 1 = right/bottom edge)
-        fx = gx - col
-        fy = gy - row
-
-        # only register when the tag centre is within the inner hot-zone
-        in_center = (_margin <= fx <= 1.0 - _margin) and \
-                    (_margin <= fy <= 1.0 - _margin)
-
-        if not in_center:
-            continue  # tag is near a cell boundary — skip
+        # Each cell centre sits at (c + 0.5, r + 0.5) in grid space.
+        # Find the nearest one by rounding the shifted coordinate.
+        col = int(np.clip(round(gx - 0.5), 0, GRID_COLS - 1))
+        row = int(np.clip(round(gy - 0.5), 0, GRID_ROWS - 1))
 
         if tid in ROBOT_TAGS:
             matrix[row][col] = CELL_ROBOT
