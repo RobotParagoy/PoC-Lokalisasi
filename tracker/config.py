@@ -51,4 +51,4 @@ CORNER_NAMES = ["TL", "TR", "BR", "BL"]
 # ── MQTT Settings ──
 MQTT_BROKER  = "192.168.0.142"
 MQTT_PORT    = 1883
-MQTT_TOPIC   = "/local"
+MQTT_TOPIC   = "local"
