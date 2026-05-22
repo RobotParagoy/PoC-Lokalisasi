@@ -39,11 +39,11 @@ GRID_ROWS = 4
 # ── Detection Zone ──
 # Fraction (0–1) of each cell's width/height used for the visual hot-zone box.
 # Detection itself uses nearest-cell-centre assignment (no dead zones).
-DETECTION_ZONE_RATIO = 0.75
+DETECTION_ZONE_RATIO = 0.3
 
 # Extra shrink applied to the drawn hot-zone at the image edge vs. centre.
 # 0.0 = no correction; 0.4 = 40 % extra shrink at the far edge.
-FISHEYE_EDGE_SHRINK  = 0.35
+FISHEYE_EDGE_SHRINK  = 0.3
 
 # ── Field Quadrilateral (TL, TR, BR, BL) ──
 FIELD_QUAD = [[370, 200], [2070, 240], [2040, 1110], [330, 1040]]
@@ -51,8 +51,8 @@ QUAD_STEP  = 10
 
 # ── Tag Registrations ──
 DOCKING_TAGS = {100: "docking1", 101: "docking2"}
-ROBOT_TAGS   = {577: "Robot 1", 579: "Robot 2"}
-ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 582: "Item 3", 583: "Item 4",
+ROBOT_TAGS   = {577: "Robot 1", 582: "Robot 2",583: "Robot 3"}
+ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 
                 585: "Item 5", 586: "Item 6", 584: "Item 7", 576: "Item 8"}
 
 CORNER_NAMES = ["TL", "TR", "BR", "BL"]
