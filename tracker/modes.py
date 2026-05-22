@@ -12,7 +12,7 @@ from tracker.config import (
 from tracker.field import quad_homography
 from tracker.fisheye import build_undistort_maps
 from tracker.overlay import draw_quad_hud, log_positions
-from tracker.processing import process_frame, make_state, handle_keypress
+from tracker.processing import process_frame, make_state, handle_keypress, update_transformer
 from tracker.capture import open_rtsp, open_video_source, show_waiting
 from tracker.grid import log_grid
 from tracker.mqtt import mqtt_connect, mqtt_publish_grid, mqtt_disconnect
@@ -40,7 +40,10 @@ def run_video_mode(detector):
         src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or FRAME_W
         src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or FRAME_H
         state['frame_size'] = (src_w, src_h)
-        state['undistort_maps'] = build_undistort_maps(src_w, src_h, state['fisheye_k'], state['fisheye_bal'])
+        res = build_undistort_maps(src_w, src_h, state['fisheye_k'], state['fisheye_bal'])
+        state['undistort_maps'] = (res[0], res[1])
+        state['camera_matrix'] = res[2]
+        update_transformer(state)
         print(f"Fisheye undistortion ON  K={state['fisheye_k']:.2f}  balance={state['fisheye_bal']:.2f}")
 
     while True:
@@ -51,7 +54,7 @@ def run_video_mode(detector):
         pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
         vis, detections, matrix, coord_dict = process_frame(
             frame, detector, state['quad'], state['H'],
-            state['selected'], state['undistort_maps'])
+            state['selected'], state['undistort_maps'], state['transformer'])
 
         if pos_ms - last_log_ms >= LOG_INTERVAL:
             log_positions(detections, state['H'], timestamp_ms=pos_ms)
@@ -140,7 +143,10 @@ def run_stream_mode(detector):
         if UNDISTORT_FISHEYE and not maps_built:
             src_h, src_w = frame.shape[:2]
             state['frame_size'] = (src_w, src_h)
-            state['undistort_maps'] = build_undistort_maps(src_w, src_h, state['fisheye_k'], state['fisheye_bal'])
+            res = build_undistort_maps(src_w, src_h, state['fisheye_k'], state['fisheye_bal'])
+            state['undistort_maps'] = (res[0], res[1])
+            state['camera_matrix'] = res[2]
+            update_transformer(state)
             maps_built = True
             print(f"Fisheye undistortion ON  K={state['fisheye_k']:.2f}  balance={state['fisheye_bal']:.2f}")
 
@@ -152,7 +158,7 @@ def run_stream_mode(detector):
 
         vis, detections, matrix, coord_dict = process_frame(
             frame, detector, state['quad'], state['H'],
-            state['selected'], state['undistort_maps'])
+            state['selected'], state['undistort_maps'], state['transformer'])
 
         if now - last_log_t >= LOG_INTERVAL:
             log_positions(detections, state['H'])
