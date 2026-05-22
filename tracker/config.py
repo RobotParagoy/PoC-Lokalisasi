@@ -37,12 +37,14 @@ GRID_COLS = 8
 GRID_ROWS = 4
 
 # Physical dimension of a single grid cell in cm for calibration
-GRID_CELL_SIZE_CM = 100.0
+GRID_CELL_SIZE_CM = 30.0
 
 # ── Detection physical Heights (Z) in cm ──
 OBJECT_HEIGHTS = {
-    "Robot 1": 18.5,
-    "Robot 2": 18.5,
+    "Robot 1": 15.0,
+    "Robot 2": 15.0,
+    "Robot 3": 15.0,
+    "Robot 4": 15.0,
     "Item 1": 32.0,
     "Item 2": 32.0,
     "Item 3": 32.0,
@@ -58,7 +60,7 @@ OBJECT_HEIGHTS = {
 # ── Detection Zone ──
 # Fraction (0–1) of each cell's width/height used for the visual hot-zone box.
 # Detection itself uses nearest-cell-centre assignment (no dead zones).
-DETECTION_ZONE_RATIO = 0.75
+DETECTION_ZONE_RATIO = 0.25
 
 # Extra shrink applied to the drawn hot-zone at the image edge vs. centre.
 # 0.0 = no correction; 0.4 = 40 % extra shrink at the far edge.

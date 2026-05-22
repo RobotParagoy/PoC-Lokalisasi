@@ -108,8 +108,14 @@ class WarehouseCoordinateTransformer:
             # Extract world positions of the camera center
             X_c, Y_c, Z_c = self.camera_world_pos[0][0], self.camera_world_pos[1][0], self.camera_world_pos[2][0]
             
-            # 4. Compute tracking scaling value s based on intersection height plane (Z = target_height)
-            s = (target_height - Z_c) / dz
+            # The world grid Z-axis direction depends on the order of corner points.
+            # Usually, X=Right, Y=Down means Z points INTO the floor. Thus Z_c is negative.
+            # We want the target plane to be shifted from the floor (0) TOWARDS the camera by target_height.
+            z_dir = 1.0 if Z_c > 0 else -1.0
+            world_z_plane = z_dir * abs(target_height)
+            
+            # 4. Compute tracking scaling value s based on intersection height plane
+            s = (world_z_plane - Z_c) / dz
             
             # 5. Derive the exact warehouse coordinate
             x_world = X_c + s * dx

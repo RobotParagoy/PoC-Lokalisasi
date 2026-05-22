@@ -47,7 +47,7 @@ def process_frame(frame, detector, quad, H, selected, undistort_maps=None, trans
     # build occupancy grid
     matrix, coord_dict = build_grid(detections, H, transformer)
 
-    vis = draw_overlay(frame, detections, quad, H, selected)
+    vis = draw_overlay(frame, detections, quad, H, selected, transformer)
     vis = draw_grid(vis, matrix, H)
     return vis, detections, matrix, coord_dict
 
