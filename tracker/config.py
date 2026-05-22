@@ -60,7 +60,7 @@ OBJECT_HEIGHTS = {
 # ── Detection Zone ──
 # Fraction (0–1) of each cell's width/height used for the visual hot-zone box.
 # Detection itself uses nearest-cell-centre assignment (no dead zones).
-DETECTION_ZONE_RATIO = 0.25
+DETECTION_ZONE_RATIO = 0.75
 
 # Extra shrink applied to the drawn hot-zone at the image edge vs. centre.
 # 0.0 = no correction; 0.4 = 40 % extra shrink at the far edge.
@@ -72,8 +72,8 @@ QUAD_STEP  = 10
 
 # ── Tag Registrations ──
 DOCKING_TAGS = {100: "docking1", 101: "docking2"}
-ROBOT_TAGS   = {577: "Robot 1", 579: "Robot 2"}
-ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 582: "Item 3", 583: "Item 4",
+ROBOT_TAGS   = {577: "Robot 1", 583: "Robot 2"}
+ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 583: "Item 4",
                 585: "Item 5", 586: "Item 6", 584: "Item 7", 576: "Item 8"}
 
 CORNER_NAMES = ["TL", "TR", "BR", "BL"]
@@ -81,4 +81,4 @@ CORNER_NAMES = ["TL", "TR", "BR", "BL"]
 # ── MQTT Settings ──
 MQTT_BROKER  = "192.168.0.142"
 MQTT_PORT    = 1883
-MQTT_TOPIC   = "host/local_dum"
+MQTT_TOPIC   = "local"
