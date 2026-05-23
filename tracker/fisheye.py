@@ -21,7 +21,7 @@ def build_undistort_maps(frame_w, frame_h, k1, balance):
     map1, map2 = cv2.fisheye.initUndistortRectifyMap(
         K, D, np.eye(3), new_K, dim, cv2.CV_16SC2
     )
-    return map1, map2
+    return map1, map2, new_K
 
 
 def undistort_frame(frame, map1, map2):

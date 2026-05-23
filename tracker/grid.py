@@ -20,7 +20,7 @@ import numpy as np
 
 from tracker.config import (
     GRID_COLS, GRID_ROWS, ROBOT_TAGS, ITEM_TAGS,
-    DETECTION_ZONE_RATIO, FISHEYE_EDGE_SHRINK,
+    DETECTION_ZONE_RATIO, FISHEYE_EDGE_SHRINK, GRID_CELL_SIZE_CM
 )
 from tracker.field import pixel_to_field, pixel_to_field_continuous
 from tracker.tags import classify_tag, tag_orientation
@@ -67,7 +67,7 @@ _LABEL = {
 # Matrix construction
 # ═════════════════════════════════════════════════════════════════════════════
 
-def build_grid(detections, H):
+def build_grid(detections, H, transformer=None):
     """Return (matrix, coord_dict) for the current frame.
 
     matrix   — list[row][col]   (row-major, 4 × 8)
@@ -91,7 +91,25 @@ def build_grid(detections, H):
 
     for det in detections:
         tid = det.tag_id
-        gx, gy = pixel_to_field_continuous(det.center[0], det.center[1], H)
+        
+        # Determine logical object class string for height lookup
+        obj_id = None
+        if tid in ROBOT_TAGS:
+            obj_id = ROBOT_TAGS[tid]
+        elif tid in ITEM_TAGS:
+            obj_id = ITEM_TAGS[tid]
+            
+        use_3d_transform = False
+        if transformer is not None and obj_id is not None:
+            obj_height = transformer.get_height(obj_id)
+            world_coords = transformer.pixel_to_warehouse_world(det.center[0], det.center[1], obj_height)
+            if world_coords:
+                gx = world_coords[0] / GRID_CELL_SIZE_CM
+                gy = world_coords[1] / GRID_CELL_SIZE_CM
+                use_3d_transform = True
+                
+        if not use_3d_transform:
+            gx, gy = pixel_to_field_continuous(det.center[0], det.center[1], H)
 
         # Each cell centre sits at (c + 0.5, r + 0.5) in grid space.
         # Find the nearest one by rounding the shifted coordinate.
