@@ -53,18 +53,56 @@ def process_frame(frame, detector, quad, H, selected, undistort_maps=None, trans
 
 
 def make_state():
-    """Create the shared mutable state dict."""
+    """Create the shared mutable state dict, loading from file if available."""
+    import json
+    import os
+    
+    # Defaults
+    quad = [list(c) for c in FIELD_QUAD]
+    f_k = FISHEYE_K
+    f_bal = FISHEYE_BALANCE
+    
+    save_path = "tuned_config.json"
+    if os.path.exists(save_path):
+        try:
+            with open(save_path, "r") as f:
+                saved = json.load(f)
+                if "quad" in saved:
+                    quad = saved["quad"]
+                if "fisheye_k" in saved:
+                    f_k = saved["fisheye_k"]
+                if "fisheye_bal" in saved:
+                    f_bal = saved["fisheye_bal"]
+                print(f"Loaded tuned configuration from {save_path}")
+        except Exception as e:
+            print(f"Failed to load tuned configuration: {e}")
+
     return {
         'selected':       0,
-        'quad':           [list(c) for c in FIELD_QUAD],
+        'quad':           quad,
         'H':              None,
-        'fisheye_k':      FISHEYE_K,
-        'fisheye_bal':    FISHEYE_BALANCE,
+        'fisheye_k':      f_k,
+        'fisheye_bal':    f_bal,
         'undistort_maps': None,
         'camera_matrix':  None,
         'transformer':    None,
         'frame_size':     None,
     }
+
+def save_tuned_config(state):
+    """Save the tuning configuration to file."""
+    import json
+    save_path = "tuned_config.json"
+    data = {
+        "quad": state['quad'],
+        "fisheye_k": state['fisheye_k'],
+        "fisheye_bal": state['fisheye_bal']
+    }
+    try:
+        with open(save_path, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"Failed to save tuned configuration: {e}")
 
 
 def handle_keypress(key, state):
@@ -88,6 +126,7 @@ def handle_keypress(key, state):
             state['camera_matrix'] = res[2]
             update_transformer(state)
         print(f"Fisheye K = {state['fisheye_k']:+.2f}")
+        save_tuned_config(state)
         return False
 
     if UNDISTORT_FISHEYE and key in (ord('-'), ord('_')):
@@ -99,6 +138,7 @@ def handle_keypress(key, state):
             state['camera_matrix'] = res[2]
             update_transformer(state)
         print(f"Fisheye K = {state['fisheye_k']:+.2f}")
+        save_tuned_config(state)
         return False
 
     if UNDISTORT_FISHEYE and key == ord(']'):
@@ -110,6 +150,7 @@ def handle_keypress(key, state):
             state['camera_matrix'] = res[2]
             update_transformer(state)
         print(f"Fisheye balance = {state['fisheye_bal']:.2f}")
+        save_tuned_config(state)
         return False
 
     if UNDISTORT_FISHEYE and key == ord('['):
@@ -121,6 +162,7 @@ def handle_keypress(key, state):
             state['camera_matrix'] = res[2]
             update_transformer(state)
         print(f"Fisheye balance = {state['fisheye_bal']:.2f}")
+        save_tuned_config(state)
         return False
 
     quad, changed = adjust_quad(state['quad'], state['selected'], key)
@@ -128,5 +170,6 @@ def handle_keypress(key, state):
         state['quad'] = quad
         state['H'] = quad_homography(quad)
         update_transformer(state)
+        save_tuned_config(state)
 
     return False
