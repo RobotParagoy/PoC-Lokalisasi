@@ -36,6 +36,27 @@ TAG_FAMILY   = "tag36h11"
 GRID_COLS = 8
 GRID_ROWS = 4
 
+# Physical dimension of a single grid cell in cm for calibration
+GRID_CELL_SIZE_CM = 30.0
+
+# ── Detection physical Heights (Z) in cm ──
+OBJECT_HEIGHTS = {
+    "Robot 1": 15.0,
+    "Robot 2": 15.0,
+    "Robot 3": 15.0,
+    "Robot 4": 15.0,
+    "Item 1": 32.0,
+    "Item 2": 32.0,
+    "Item 3": 32.0,
+    "Item 4": 32.0,
+    "Item 5": 32.0,
+    "Item 6": 32.0,
+    "Item 7": 32.0,
+    "Item 8": 32.0,
+    "docking1": 0.0,
+    "docking2": 0.0,
+}
+
 # ── Detection Zone ──
 # Fraction (0–1) of each cell's width/height used for the visual hot-zone box.
 # Detection itself uses nearest-cell-centre assignment (no dead zones).
@@ -51,9 +72,13 @@ QUAD_STEP  = 10
 
 # ── Tag Registrations ──
 DOCKING_TAGS = {100: "docking1", 101: "docking2"}
-ROBOT_TAGS   = {577: "Robot 1", 582: "Robot 2",583: "Robot 3"}
-ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 
-                585: "Item 5", 586: "Item 6", 584: "Item 7", 576: "Item 8"}
+ROBOT_TAGS   = {577: "Robot 1", 578: "Robot 2", 579: "Robot 3"}
+ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 582: "Item 3", 583: "Item 4",
+                585: "Item 5", 586: "Item 6", 584: "Item 7", 576: "Item 8",
+                560: "Item 9", 561: "Item 10", 562: "Item 11", 563: "Item 12",
+                564: "Item 13", 565: "Item 14", 566: "Item 15", 567: "Item 16"}
+
+
 
 CORNER_NAMES = ["TL", "TR", "BR", "BL"]
 
