@@ -45,14 +45,14 @@ OBJECT_HEIGHTS = {
     "Robot 2": 15.0,
     "Robot 3": 15.0,
     "Robot 4": 15.0,
-    "Item 1": 32.0,
-    "Item 2": 32.0,
-    "Item 3": 32.0,
-    "Item 4": 32.0,
-    "Item 5": 32.0,
-    "Item 6": 32.0,
-    "Item 7": 32.0,
-    "Item 8": 32.0,
+    "Item 1": 30.0,
+    "Item 2": 30.0,
+    "Item 3": 30.0,
+    "Item 4": 30.0,
+    "Item 5": 30.0,
+    "Item 6": 30.0,
+    "Item 7": 30.0,
+    "Item 8": 30.0,
     "docking1": 0.0,
     "docking2": 0.0,
 }
@@ -60,7 +60,7 @@ OBJECT_HEIGHTS = {
 # ── Detection Zone ──
 # Fraction (0–1) of each cell's width/height used for the visual hot-zone box.
 # Detection itself uses nearest-cell-centre assignment (no dead zones).
-DETECTION_ZONE_RATIO = 0.3
+DETECTION_ZONE_RATIO = 0.65
 
 # Extra shrink applied to the drawn hot-zone at the image edge vs. centre.
 # 0.0 = no correction; 0.4 = 40 % extra shrink at the far edge.
