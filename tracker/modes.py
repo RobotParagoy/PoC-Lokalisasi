@@ -14,8 +14,8 @@ from tracker.fisheye import build_undistort_maps
 from tracker.overlay import draw_quad_hud, log_positions
 from tracker.processing import process_frame, make_state, handle_keypress, update_transformer
 from tracker.capture import open_rtsp, open_video_source, show_waiting
-from tracker.grid import log_grid
-from tracker.mqtt import mqtt_connect, mqtt_publish_grid, mqtt_disconnect
+from tracker.grid import log_grid, build_entity_state
+from tracker.mqtt import mqtt_connect, mqtt_publish_state, mqtt_publish_grid, mqtt_disconnect
 
 
 def run_video_mode(detector):
@@ -59,6 +59,8 @@ def run_video_mode(detector):
         if pos_ms - last_log_ms >= LOG_INTERVAL:
             log_positions(detections, state['H'], timestamp_ms=pos_ms)
             log_grid(matrix, coord_dict)
+            entities = build_entity_state(detections, state['H'], state['transformer'])
+            mqtt_publish_state(coord_dict, entities, ts_ms=int(pos_ms))
             mqtt_publish_grid(coord_dict)
             last_log_ms = pos_ms
 
@@ -163,6 +165,8 @@ def run_stream_mode(detector):
         if now - last_log_t >= LOG_INTERVAL:
             log_positions(detections, state['H'])
             log_grid(matrix, coord_dict)
+            entities = build_entity_state(detections, state['H'], state['transformer'])
+            mqtt_publish_state(coord_dict, entities, ts_ms=int(now * 1000))
             mqtt_publish_grid(coord_dict)
             last_log_t = now
 

@@ -24,39 +24,68 @@ The area is represented by a virtually mapped occupancy grid.
     row 2        ← permanent docking (col 0)
     row 3
 
-## Output Payload
+## MQTT Output
 
-The state of the system is serialized into a lightweight JSON payload and published over the network. The payload is represented as a Key-Value pair dictionary mapping grid coordinates to cell contents.
+The system publishes a full snapshot every cycle and sends per-entity updates only when an entity changes or disappears. The legacy base topic remains available for backward compatibility.
 
-### Example Payload Structure
+### Aggregate Snapshot Topic
+
+**Topic:** `{MQTT_TOPIC}/state` (default: `local/state`)
+
+Payload:
 ```json
 {
-  "(0,0)": 0,
-  "(1,0)": 0,
-  "(0,1)": 4,
-  "(0,2)": 4,
-  "(7,3)": [577, 90],
-  "(4,2)": [583, 180]
+  "ts_ms": 1717040000000,
+  "grid": {
+    "(0,0)": 0,
+    "(0,1)": 4,
+    "(7,3)": [577, 90]
+  },
+  "robots": {
+    "577": {
+      "id": 577,
+      "name": "Robot 1",
+      "type": "robot",
+      "grid": {"col": 7, "row": 3},
+      "orientation_deg": 90,
+      "pixel": {"x": 1260, "y": 640},
+      "mapping": "3d",
+      "world_cm": {"x": 210.5, "y": 95.2}
+    }
+  },
+  "items": {
+    "583": {
+      "id": 583,
+      "name": "Item 4",
+      "type": "item",
+      "grid": {"col": 4, "row": 2},
+      "orientation_deg": 180,
+      "pixel": {"x": 820, "y": 510},
+      "mapping": "2d"
+    }
+  }
 }
 ```
 
-### Payload Anatomy
-- **Key:** A string representing the cell's coordinate `"(col,row)"`.
-- **Value:** The content of the cell. Values can be either integers (representing static grid slots) or an array (representing detection details).
+### Per-Entity Topics (Published on Change)
 
-**Static Integer Values:**
-- `0`: **Empty** / unoccupied lane without any tags.
-- `4`: **Docking area** (Hardcoded to permanent cells `(0,1)` and `(0,2)`).
-- `1`: **Robot** (Used internally for matrix building).
-- `2`: **Goods/Items** (Used internally for matrix building).
+- **Robots:** `{MQTT_TOPIC}/robots/<robot_id>` (example: `local/robots/577`)
+- **Items:** `{MQTT_TOPIC}/items/<item_id>` (example: `local/items/583`)
 
-**Detection Values (Array):** 
-Whenever a tag enters the grid, its assigned cell key receives a two-element array:
-`[tag_id, orientation_degrees]`
-- `tag_id` (int): The exact AprilTag ID detected (e.g., Robot ID `577`, Item ID `583`).
-- `orientation_degrees` (int): Rotational heading of the tag bounding box from 0 to 359 degrees.
+Each per-entity payload includes `visible` and `ts_ms`. When an entity disappears, `visible` becomes `false` and the last known ID/name are retained.
 
-The object is assigned to a grid point using the nearest-cell-centre logic (Voronoi region assignment), effectively eliminating tracking dead zones. Objects also utilize true 3D spatial transformation that factors in the vertical plane (Z-heights of known tags) to prevent radial distortion as they move out from the camera center.
+### Legacy Topic (Backward Compatibility)
+
+**Topic:** `{MQTT_TOPIC}` (default: `local`)
+
+Payload: the original grid-only JSON mapping. This keeps existing consumers working while new consumers can subscribe to detailed state and per-entity topics.
+
+### Grid Encoding (Inside `grid`)
+
+- **Key:** `"(col,row)"`
+- **Value:** `0` (empty), `4` (docking), or `[tag_id, orientation_degrees]` for detected tags.
+
+The grid assignment uses nearest-cell-centre logic (Voronoi region assignment), removing dead zones. When available, a 3D transform is used to map tag centers based on known object heights.
 
 ## Encoding & Delivery
 
@@ -69,7 +98,7 @@ The JSON payload is published using the **MQTT** protocol via `paho-mqtt`.
 **Default MQTT Settings (Configurable in `tracker/config.py`):**
 - **Broker IP:** `192.168.0.142`
 - **Broker Port:** `1883`
-- **Topic:** `local`
+- **Base Topic:** `local`
 - **Client ID:** `robot-tracker`
 
 ## Operations

@@ -67,6 +67,72 @@ _LABEL = {
 # Matrix construction
 # ═════════════════════════════════════════════════════════════════════════════
 
+def map_detection_to_cell(det, H, transformer=None):
+    """Map a detection to a grid cell using 2D or 3D mapping."""
+    tid = det.tag_id
+
+    obj_id = None
+    if tid in ROBOT_TAGS:
+        obj_id = ROBOT_TAGS[tid]
+    elif tid in ITEM_TAGS:
+        obj_id = ITEM_TAGS[tid]
+
+    world_coords = None
+    use_3d_transform = False
+    if transformer is not None and obj_id is not None:
+        obj_height = transformer.get_height(obj_id)
+        world_coords = transformer.pixel_to_warehouse_world(
+            det.center[0], det.center[1], obj_height
+        )
+        if world_coords:
+            gx = world_coords[0] / GRID_CELL_SIZE_CM
+            gy = world_coords[1] / GRID_CELL_SIZE_CM
+            use_3d_transform = True
+
+    if not use_3d_transform:
+        gx, gy = pixel_to_field_continuous(det.center[0], det.center[1], H)
+
+    col = int(np.clip(round(gx - 0.5), 0, GRID_COLS - 1))
+    row = int(np.clip(round(gy - 0.5), 0, GRID_ROWS - 1))
+    return col, row, world_coords, use_3d_transform
+
+
+def build_entity_state(detections, H, transformer=None):
+    """Build a list of detailed entity payloads for robots and items."""
+    entities = []
+    for det in detections:
+        tid = det.tag_id
+        name, tag_type = classify_tag(tid)
+        if tag_type not in ("robot", "item"):
+            continue
+
+        col, row, world_coords, use_3d_transform = map_detection_to_cell(
+            det, H, transformer
+        )
+        orient = tag_orientation(det.corners)
+        px, py = det.center
+
+        entity = {
+            "id": int(tid),
+            "name": name,
+            "type": tag_type,
+            "grid": {"col": int(col), "row": int(row)},
+            "orientation_deg": int(orient),
+            "pixel": {"x": int(round(float(px))), "y": int(round(float(py)))},
+            "mapping": "3d" if use_3d_transform else "2d",
+        }
+
+        if use_3d_transform and world_coords is not None:
+            entity["world_cm"] = {
+                "x": round(float(world_coords[0]), 2),
+                "y": round(float(world_coords[1]), 2),
+            }
+
+        entities.append(entity)
+
+    return entities
+
+
 def build_grid(detections, H, transformer=None):
     """Return (matrix, coord_dict) for the current frame.
 
@@ -91,30 +157,9 @@ def build_grid(detections, H, transformer=None):
 
     for det in detections:
         tid = det.tag_id
-        
-        # Determine logical object class string for height lookup
-        obj_id = None
-        if tid in ROBOT_TAGS:
-            obj_id = ROBOT_TAGS[tid]
-        elif tid in ITEM_TAGS:
-            obj_id = ITEM_TAGS[tid]
-            
-        use_3d_transform = False
-        if transformer is not None and obj_id is not None:
-            obj_height = transformer.get_height(obj_id)
-            world_coords = transformer.pixel_to_warehouse_world(det.center[0], det.center[1], obj_height)
-            if world_coords:
-                gx = world_coords[0] / GRID_CELL_SIZE_CM
-                gy = world_coords[1] / GRID_CELL_SIZE_CM
-                use_3d_transform = True
-                
-        if not use_3d_transform:
-            gx, gy = pixel_to_field_continuous(det.center[0], det.center[1], H)
-
-        # Each cell centre sits at (c + 0.5, r + 0.5) in grid space.
-        # Find the nearest one by rounding the shifted coordinate.
-        col = int(np.clip(round(gx - 0.5), 0, GRID_COLS - 1))
-        row = int(np.clip(round(gy - 0.5), 0, GRID_ROWS - 1))
+        col, row, _world_coords, _use_3d_transform = map_detection_to_cell(
+            det, H, transformer
+        )
 
         if tid in ROBOT_TAGS:
             matrix[row][col] = CELL_ROBOT
