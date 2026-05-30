@@ -72,7 +72,7 @@ QUAD_STEP  = 10
 
 # ── Tag Registrations ──
 DOCKING_TAGS = {100: "docking1", 101: "docking2"}
-ROBOT_TAGS   = {577: "Robot 1", 578: "Robot 2", 579: "Robot 3"}
+ROBOT_TAGS   = {577: "Robot 1", 578: "Robot 2", 579: "Robot 3", 576: "Robot 4"}
 ITEM_TAGS    = {580: "Item 1", 581: "Item 2", 582: "Item 3", 583: "Item 4",
                 585: "Item 5", 586: "Item 6", 584: "Item 7", 576: "Item 8",
                 560: "Item 9", 561: "Item 10", 562: "Item 11", 563: "Item 12",

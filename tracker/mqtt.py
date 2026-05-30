@@ -6,14 +6,14 @@ import time
 
 import paho.mqtt.client as mqtt
 
-from tracker.config import MQTT_BROKER, MQTT_PORT, MQTT_TOPIC
+from tracker.config import MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, ROBOT_TAGS
 
 # ── Module-level singleton ───────────────────────────────────────────────────
 _client = None           # type: mqtt.Client | None
 _connected = False
 _lock = threading.Lock()
-_last_entity_change = {}  # (type, id) -> change key
-_last_entity_info = {}    # (type, id) -> {id, name, type}
+_last_entity_change = {}  # (type, name) -> change key
+_last_entity_info = {}    # (type, name) -> {id, name, type}
 
 
 def _on_connect(client, userdata, flags, rc, properties=None):
@@ -77,6 +77,12 @@ def _entity_change_key(entity):
     )
 
 
+def _name_to_topic(name, fallback_prefix, fallback_id):
+    if name:
+        return name.strip().lower().replace(" ", "_")
+    return f"{fallback_prefix}_{fallback_id}"
+
+
 def mqtt_publish_state(coord_dict, entities, ts_ms=None, base_topic=None):
     """Publish aggregate state plus per-entity updates on change."""
     if _client is None or not _connected:
@@ -110,7 +116,9 @@ def mqtt_publish_state(coord_dict, entities, ts_ms=None, base_topic=None):
             continue
 
         ent_id = int(entity["id"])
-        key = (ent_type, ent_id)
+        ent_name = entity.get("name")
+        topic_name = _name_to_topic(ent_name, ent_type, ent_id)
+        key = (ent_type, topic_name)
         seen.add(key)
 
         change_key = _entity_change_key(entity)
@@ -118,29 +126,40 @@ def mqtt_publish_state(coord_dict, entities, ts_ms=None, base_topic=None):
             payload = dict(entity)
             payload["visible"] = True
             payload["ts_ms"] = int(ts_ms)
-            _publish_json(f"{base}/{ent_type}s/{ent_id}", payload)
+            _publish_json(f"{base}/{ent_type}s/{topic_name}", payload)
 
             _last_entity_change[key] = change_key
             _last_entity_info[key] = {
                 "id": ent_id,
-                "name": entity.get("name"),
+                "name": ent_name,
                 "type": ent_type,
             }
 
-    vanished = [key for key in _last_entity_change if key not in seen]
-    for ent_type, ent_id in vanished:
-        info = _last_entity_info.get((ent_type, ent_id), {"id": ent_id, "type": ent_type})
-        payload = {
-            "id": info.get("id", ent_id),
-            "name": info.get("name"),
-            "type": ent_type,
-            "visible": False,
-            "ts_ms": int(ts_ms),
-        }
-        _publish_json(f"{base}/{ent_type}s/{ent_id}", payload)
+    robot_names = {
+        _name_to_topic(name, "robot", tid): name
+        for tid, name in ROBOT_TAGS.items()
+    }
+    for topic_name, robot_name in robot_names.items():
+        key = ("robot", topic_name)
+        if key in seen:
+            continue
 
-        _last_entity_change.pop((ent_type, ent_id), None)
-        _last_entity_info.pop((ent_type, ent_id), None)
+        change_key = (False, None, None, None)
+        if _last_entity_change.get(key) != change_key:
+            payload = {
+                "id": None,
+                "name": robot_name,
+                "type": "robot",
+                "visible": False,
+                "ts_ms": int(ts_ms),
+            }
+            _publish_json(f"{base}/robots/{topic_name}", payload)
+            _last_entity_change[key] = change_key
+            _last_entity_info[key] = {
+                "id": None,
+                "name": robot_name,
+                "type": "robot",
+            }
 
 
 def mqtt_publish_grid(coord_dict):

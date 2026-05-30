@@ -69,10 +69,10 @@ Payload:
 
 ### Per-Entity Topics (Published on Change)
 
-- **Robots:** `{MQTT_TOPIC}/robots/<robot_id>` (example: `local/robots/577`)
-- **Items:** `{MQTT_TOPIC}/items/<item_id>` (example: `local/items/583`)
+- **Robots:** `{MQTT_TOPIC}/robots/robot_1` .. `robot_4` (example: `local/robots/robot_1`)
+- **Items:** `{MQTT_TOPIC}/items/item_1` .. (example: `local/items/item_4`)
 
-Each per-entity payload includes `visible` and `ts_ms`. When an entity disappears, `visible` becomes `false` and the last known ID/name are retained.
+Each per-entity payload includes `visible` and `ts_ms`. Robots always publish a `visible: false` update when not detected. Items publish only when detected.
 
 ### Legacy Topic (Backward Compatibility)
 
