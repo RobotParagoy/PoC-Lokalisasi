@@ -40,19 +40,12 @@ GRID_ROWS = 4
 GRID_CELL_SIZE_CM = 30.0
 
 # ── Detection physical Heights (Z) in cm ──
+# (Items are assigned automatically below)
 OBJECT_HEIGHTS = {
     "Robot 1": 15.0,
     "Robot 2": 15.0,
     "Robot 3": 15.0,
     "Robot 4": 15.0,
-    "Item 1": 30.0,
-    "Item 2": 30.0,
-    "Item 3": 30.0,
-    "Item 4": 30.0,
-    "Item 5": 30.0,
-    "Item 6": 30.0,
-    "Item 7": 30.0,
-    "Item 8": 30.0,
     "docking1": 0.0,
     "docking2": 0.0,
 }
@@ -86,3 +79,8 @@ CORNER_NAMES = ["TL", "TR", "BR", "BL"]
 MQTT_BROKER  = "192.168.0.142"
 MQTT_PORT    = 1883
 MQTT_TOPIC   = "local"
+
+# Automatically assign the same height (30.0 cm) to all registered items
+for item_name in ITEM_TAGS.values():
+    if item_name not in OBJECT_HEIGHTS:
+        OBJECT_HEIGHTS[item_name] = 30.0
