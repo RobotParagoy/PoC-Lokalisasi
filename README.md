@@ -72,7 +72,36 @@ Payload:
 - **Robots:** `{MQTT_TOPIC}/robots/robot_1` .. `robot_4` (example: `local/robots/robot_1`)
 - **Items:** `{MQTT_TOPIC}/items/item_1` .. (example: `local/items/item_4`)
 
+Topic names come from the tag names in config (lowercased, spaces replaced with underscores).
+
 Each per-entity payload includes `visible` and `ts_ms`. Robots always publish a `visible: false` update when not detected. Items publish only when detected.
+
+Example robot payload:
+```json
+{
+  "id": 577,
+  "name": "Robot 1",
+  "type": "robot",
+  "grid": {"col": 7, "row": 3},
+  "orientation_deg": 90,
+  "pixel": {"x": 1260, "y": 640},
+  "mapping": "3d",
+  "world_cm": {"x": 210.5, "y": 95.2},
+  "visible": true,
+  "ts_ms": 1717040000000
+}
+```
+
+Example robot missing update:
+```json
+{
+  "id": null,
+  "name": "Robot 2",
+  "type": "robot",
+  "visible": false,
+  "ts_ms": 1717040000000
+}
+```
 
 ### Legacy Topic (Backward Compatibility)
 

@@ -14,6 +14,7 @@ _connected = False
 _lock = threading.Lock()
 _last_entity_change = {}  # (type, name) -> change key
 _last_entity_info = {}    # (type, name) -> {id, name, type}
+_last_entity_publish_time = {} # (type, name) -> ts_ms
 
 
 def _on_connect(client, userdata, flags, rc, properties=None):
@@ -122,13 +123,20 @@ def mqtt_publish_state(coord_dict, entities, ts_ms=None, base_topic=None):
         seen.add(key)
 
         change_key = _entity_change_key(entity)
-        if _last_entity_change.get(key) != change_key:
+        
+        last_pub_time = _last_entity_publish_time.get(key, 0)
+        should_publish = (_last_entity_change.get(key) != change_key)
+        if ent_type == "robot" and (ts_ms - last_pub_time) >= 10000:
+            should_publish = True
+        
+        if should_publish:
             payload = dict(entity)
             payload["visible"] = True
             payload["ts_ms"] = int(ts_ms)
             _publish_json(f"{base}/{ent_type}s/{topic_name}", payload)
 
             _last_entity_change[key] = change_key
+            _last_entity_publish_time[key] = int(ts_ms)
             _last_entity_info[key] = {
                 "id": ent_id,
                 "name": ent_name,
@@ -145,7 +153,11 @@ def mqtt_publish_state(coord_dict, entities, ts_ms=None, base_topic=None):
             continue
 
         change_key = (False, None, None, None)
-        if _last_entity_change.get(key) != change_key:
+        
+        last_pub_time = _last_entity_publish_time.get(key, 0)
+        should_publish = (_last_entity_change.get(key) != change_key) or ((ts_ms - last_pub_time) >= 10000)
+
+        if should_publish:
             payload = {
                 "id": None,
                 "name": robot_name,
@@ -155,6 +167,7 @@ def mqtt_publish_state(coord_dict, entities, ts_ms=None, base_topic=None):
             }
             _publish_json(f"{base}/robots/{topic_name}", payload)
             _last_entity_change[key] = change_key
+            _last_entity_publish_time[key] = int(ts_ms)
             _last_entity_info[key] = {
                 "id": None,
                 "name": robot_name,
